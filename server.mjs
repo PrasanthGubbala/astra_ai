@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+if (existsSync(path.join(root, ".env"))) process.loadEnvFile(path.join(root, ".env"));
 const dataDir = process.env.DATA_DIR || path.join(root, "data");
 const originalDir = path.join(dataDir, "originals");
 const signedDir = path.join(dataDir, "signed");
@@ -118,8 +120,8 @@ function validatePdf(encoded) {
 }
 
 function safeFile(file) {
-  const { id, clientName, clientEmail, reference, agreementName, status, createdAt, sentAt, signedAt, events, signatureUrl } = file;
-  return { id, clientName, clientEmail, reference, agreementName, status, createdAt, sentAt, signedAt, events, signatureUrl };
+  const { id, clientName, clientEmail, reference, agreementName, status, createdAt, sentAt, signedAt, events, signatureUrl, clientPortalUrl } = file;
+  return { id, clientName, clientEmail, reference, agreementName, status, createdAt, sentAt, signedAt, events, signatureUrl, clientPortalUrl };
 }
 
 function findByToken(files, token) {
@@ -159,7 +161,14 @@ const server = createServer(async (request, response) => {
     }
 
     if (method === "GET" && pathname === "/api/files") {
-      respond(response, 200, (await loadFiles()).map(safeFile));
+      const files = await updateFiles((files) => {
+        for (const file of files) {
+          if (!file.clientPortalToken) file.clientPortalToken = randomBytes(32).toString("hex");
+          file.clientPortalUrl = `${url.origin}/#client/${file.clientPortalToken}`;
+        }
+        return files.map(safeFile);
+      });
+      respond(response, 200, files);
       return;
     }
 
@@ -187,6 +196,32 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const agreementMatch = pathname.match(/^\/api\/agreements\/([a-f0-9-]+)$/);
+    if (method === "PATCH" && agreementMatch) {
+      const body = await readJson(request);
+      const name = String(body.name || "").trim();
+      if (name.length < 1 || name.length > 180) throw fail(400, "Enter an agreement name between 1 and 180 characters.");
+      const agreement = await updateAgreements((agreements) => {
+        const found = agreements.find((item) => item.id === agreementMatch[1]);
+        if (!found) throw fail(404, "Agreement template not found.");
+        found.name = name;
+        return found;
+      });
+      respond(response, 200, agreement);
+      return;
+    }
+
+    if (method === "DELETE" && agreementMatch) {
+      const agreement = await updateAgreements((agreements) => {
+        const index = agreements.findIndex((item) => item.id === agreementMatch[1]);
+        if (index < 0) throw fail(404, "Agreement template not found.");
+        return agreements.splice(index, 1)[0];
+      });
+      await rm(path.join(agreementDir, `${agreement.id}.pdf`), { force: true });
+      respond(response, 200, { ok: true });
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/files") {
       const body = await readJson(request);
       const clientName = String(body.clientName || "").trim();
@@ -204,7 +239,8 @@ const server = createServer(async (request, response) => {
       if (templateId) {
         selectedTemplate = (await loadAgreements()).find((item) => item.id === templateId);
         if (!selectedTemplate) throw fail(404, "The selected saved agreement was not found. Refresh and try again.");
-        agreementName = selectedTemplate.name;
+        agreementName = String(body.agreementName || selectedTemplate.name).trim();
+        if (agreementName.length < 1 || agreementName.length > 180) throw fail(400, "Choose an agreement name between 1 and 180 characters.");
         field = selectedTemplate.signatureField;
         pageCount = selectedTemplate.pageCount;
         pdf = await readFile(path.join(agreementDir, `${selectedTemplate.id}.pdf`)).catch(() => { throw fail(404, "The selected agreement document could not be found."); });
@@ -220,6 +256,7 @@ const server = createServer(async (request, response) => {
         pdf = validatePdf(body.pdfBase64);
       }
       const id = randomUUID();
+      const clientPortalToken = randomBytes(32).toString("hex");
       await writeFile(path.join(originalDir, `${id}.pdf`), pdf, { mode: 0o600 });
       let savedTemplate = selectedTemplate;
       if (!selectedTemplate && body.saveAsAgreement === true) {
@@ -242,6 +279,8 @@ const server = createServer(async (request, response) => {
         templateId: savedTemplate?.id,
         status: "draft",
         createdAt: new Date().toISOString(),
+        clientPortalToken,
+        clientPortalUrl: `${url.origin}/#client/${clientPortalToken}`,
         signatureField: field,
         events: [{
           type: "file_created",
@@ -261,6 +300,10 @@ const server = createServer(async (request, response) => {
         const found = files.find((item) => item.id === sendMatch[1]);
         if (!found) throw fail(404, "File not found.");
         if (found.status !== "draft" && found.status !== "declined") throw fail(409, "This agreement has already been sent or completed.");
+        if (!found.clientPortalToken) {
+          found.clientPortalToken = randomBytes(32).toString("hex");
+          found.clientPortalUrl = `${url.origin}/#client/${found.clientPortalToken}`;
+        }
         found.signingToken = token;
         found.status = "sent";
         found.sentAt = new Date().toISOString();
@@ -283,7 +326,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, {
         "content-type": "application/pdf",
         "content-length": bytes.length,
-        "content-disposition": `${isSigned ? "attachment" : "inline"}; filename="${encodeURIComponent(file.agreementName.replace(/\.pdf$/i, ""))}${isSigned ? "-signed" : ""}.pdf"`,
+        "content-disposition": `inline; filename="${encodeURIComponent(file.agreementName.replace(/\.pdf$/i, ""))}${isSigned ? "-signed" : ""}.pdf"`,
         "cache-control": "private, no-store",
       });
       response.end(bytes);
@@ -291,6 +334,25 @@ const server = createServer(async (request, response) => {
     }
 
     const signMatch = pathname.match(/^\/api\/sign\/([a-f0-9]{64})$/);
+    const clientMatch = pathname.match(/^\/api\/client\/([a-f0-9]{64})$/);
+    if (method === "GET" && clientMatch) {
+      const files = await loadFiles();
+      const accessFile = files.find((file) => file.clientPortalToken === clientMatch[1]);
+      if (!accessFile) throw fail(404, "This client portal link is invalid.");
+      const clientFiles = files.filter((file) => file.clientEmail === accessFile.clientEmail).map((file) => ({
+        id: file.id,
+        agreementName: file.agreementName,
+        reference: file.reference,
+        status: file.status,
+        createdAt: file.createdAt,
+        sentAt: file.sentAt,
+        signedAt: file.signedAt,
+        signingUrl: file.status === "sent" ? file.signatureUrl : undefined,
+        signedUrl: file.status === "signed" ? `/api/files/${file.id}/signed` : undefined,
+      }));
+      respond(response, 200, { clientName: accessFile.clientName, files: clientFiles });
+      return;
+    }
     if (method === "GET" && signMatch) {
       const file = findByToken(await loadFiles(), signMatch[1]);
       if (!file || file.status !== "sent") throw fail(404, "This signing link is invalid, expired, or already completed.");
@@ -300,6 +362,7 @@ const server = createServer(async (request, response) => {
         agreementName: file.agreementName,
         signatureField: file.signatureField,
         originalUrl: `/api/files/${file.id}/original`,
+        clientPortalUrl: file.clientPortalUrl,
       });
       return;
     }

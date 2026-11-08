@@ -25,7 +25,7 @@ The client needs the agreement to be completed for each file, including an agree
 
 ## Run locally
 
-Requires Node.js 20 or newer.
+Requires Node.js 20.12 or newer.
 
 ```sh
 npm install
@@ -33,7 +33,9 @@ npm run build
 npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000). For frontend development with hot reload, use `npm run dev`; the API proxy expects the Node server at port 3000, so run `npm start` in another terminal. File records and documents are stored in `./data` by default. Set `DATA_DIR` to use another persistent directory.
+Open [http://localhost:3000](http://localhost:3000). For frontend development with hot reload, use `npm run dev`; the API proxy expects the Node server at port 3000, so run `npm start` in another terminal.
+
+Copy `.env.example` to `.env` and set local configuration there. `server.mjs` loads `.env` on startup using Node's built-in env-file loader. `PORT` sets the server port; `DATA_DIR` sets where files and agreements are stored. Keep API keys and other secrets in `.env`, never commit `.env`, and read credentials in server code through `process.env`. No external API key is required or currently consumed by this app.
 
 Run the API tests with `npm test`.
 

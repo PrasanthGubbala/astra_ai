@@ -167,14 +167,45 @@ function showTemplates() {
     <div class="back-link-wrap"><button class="text-button" data-back>${icons.arrow} Back to files</button></div>
     <div class="page-heading compact-heading"><div><div class="eyebrow">AGREEMENT LIBRARY</div><h1>One reviewed agreement. Every new file.</h1><p>Save your team's standard agreement once, then attach it to the next client file in a click.</p></div><button class="button button-primary" data-add-agreement>${icons.plus} Add an agreement</button></div>
     <div class="agreement-library">${state.agreements.length ? state.agreements.map((agreement) => `
-      <article class="library-card"><span class="template-symbol">${icons.file}</span><div class="library-copy"><span class="status-pill status-signed"><i></i>Ready to use</span><h2>${escapeHtml(agreement.name)}</h2><p>${agreement.pageCount} ${agreement.pageCount === 1 ? "page" : "pages"} · Signature field on page ${agreement.signatureField.page} · Used on ${agreement.filesUsed || 0} ${agreement.filesUsed === 1 ? "file" : "files"}</p><small>Added ${formatDate(agreement.createdAt)}</small></div><button class="button button-secondary" data-use-agreement="${escapeHtml(agreement.id)}">Use for a client file ${icons.arrow}</button></article>`).join("") : `
+      <article class="library-card"><span class="template-symbol">${icons.file}</span><div class="library-copy"><span class="status-pill status-signed"><i></i>Ready to use</span><h2>${escapeHtml(agreement.name)}</h2><p>${agreement.pageCount} ${agreement.pageCount === 1 ? "page" : "pages"} · Signature field on page ${agreement.signatureField.page} · Used on ${agreement.filesUsed || 0} ${agreement.filesUsed === 1 ? "file" : "files"}</p><small>Added ${formatDate(agreement.createdAt)}</small></div><div class="library-actions"><button class="button button-secondary" data-use-agreement="${escapeHtml(agreement.id)}">Use for a client file ${icons.arrow}</button><button class="library-action-link" data-manage-agreement="${escapeHtml(agreement.id)}">Rename</button><button class="library-action-link danger" data-delete-agreement="${escapeHtml(agreement.id)}">Delete</button></div></article>`).join("") : `
       <div class="empty-state library-empty"><span class="empty-illustration">${icons.file}</span><h3>No saved agreements yet</h3><p>Upload your standard agreement, review it, and place the signature field once. Save it to use again on future files.</p><button class="button button-primary" data-add-agreement>${icons.plus} Add your first agreement</button></div>`}
     </div>
+    <section class="starter-library">
+      <div><div class="eyebrow">FIRST-TIME SETUP</div><h2>Try a sample agreement</h2><p>No PDF yet? Start a test client file with one of these built-in samples.</p></div>
+      <div class="starter-template-options"><button type="button" data-use-starter="service"><strong>Client services agreement</strong><small>Sample agreement for a client engagement</small><em>Use template →</em></button><button type="button" data-use-starter="nda"><strong>Mutual NDA</strong><small>Sample confidentiality agreement</small><em>Use template →</em></button></div>
+      <small>For test/demo use only. Upload your approved MIND agreement when it is available.</small>
+    </section>
     <div class="feature-note">${icons.shield}<span><b>New agreements are welcome.</b> Upload a PDF we have never seen, review every page, and set its signing position before adding it to your library.</span></div>
   `, { active: "templates", title: "Agreements", subtitle: "Upload the agreement your team already uses." });
   document.querySelector("[data-back]")?.addEventListener("click", dashboard);
   document.querySelectorAll("[data-add-agreement]").forEach((button) => button.addEventListener("click", () => newFile("", false)));
   document.querySelectorAll("[data-use-agreement]").forEach((button) => button.addEventListener("click", () => newFile(button.dataset.useAgreement, false)));
+  document.querySelectorAll("[data-manage-agreement]").forEach((button) => button.addEventListener("click", () => manageAgreement(button.dataset.manageAgreement)));
+  document.querySelectorAll("[data-delete-agreement]").forEach((button) => button.addEventListener("click", () => deleteAgreement(button.dataset.deleteAgreement)));
+  document.querySelectorAll("[data-use-starter]").forEach((button) => button.addEventListener("click", () => beginStarterFile(button.dataset.useStarter)));
+}
+
+async function deleteAgreement(id) {
+  if (!window.confirm("Delete this agreement from the library? Existing client-file PDFs will be kept.")) return;
+  try { await api(`/api/agreements/${id}`, { method: "DELETE" }); await loadAgreements(); showTemplates(); toast("Agreement removed from the library."); } catch (error) { toast(error.message, "error"); }
+}
+
+function manageAgreement(id) {
+  const agreement = state.agreements.find((item) => item.id === id);
+  if (!agreement) return;
+  document.querySelector("#modal-root").innerHTML = `<div class="modal-backdrop"><section class="manage-modal"><button class="modal-close" data-close-modal aria-label="Close">×</button><div class="eyebrow">MANAGE AGREEMENT</div><h2>${escapeHtml(agreement.name)}</h2><p>Renaming changes this reusable library item only. Existing client files and signed PDFs are preserved.</p><label class="field-label">Agreement name<input id="manage-agreement-name" value="${escapeHtml(agreement.name)}" maxlength="180"></label><div class="modal-actions"><button class="button button-primary" id="save-agreement-name">Save name</button><button class="button button-secondary" id="delete-agreement">Delete from library</button></div><div class="revision-note"><b>Need to change contract text or signature placement?</b><span>Upload a revised PDF as a new agreement. Signed agreements stay unchanged; send the revision for a new signature where needed.</span></div></section></div>`;
+  document.querySelector("[data-close-modal]").addEventListener("click", () => { document.querySelector("#modal-root").innerHTML = ""; });
+  document.querySelector("#save-agreement-name").addEventListener("click", async () => {
+    try { await api(`/api/agreements/${id}`, { method: "PATCH", body: JSON.stringify({ name: document.querySelector("#manage-agreement-name").value }) }); await loadAgreements(); showTemplates(); toast("Agreement name updated."); } catch (error) { toast(error.message, "error"); }
+  });
+  document.querySelector("#delete-agreement").addEventListener("click", async () => {
+    await deleteAgreement(id);
+  });
+}
+
+async function beginStarterFile(kind) {
+  await newFile("", false);
+  await createStarterAgreement(kind);
 }
 
 async function newFile(templateId = null, useDefaultAgreement = true) {
@@ -203,15 +234,22 @@ async function newFile(templateId = null, useDefaultAgreement = true) {
         <div class="card-title-row"><span class="step-number">01</span><div><h2>Client &amp; file</h2><p>Who is this agreement for?</p></div></div>
         <label class="field-label">Client name <span>*</span><input name="clientName" required minlength="2" maxlength="120" placeholder="e.g. Jordan Lee" autocomplete="name"></label>
         <label class="field-label">Client email <span>*</span><input name="clientEmail" type="email" required maxlength="254" placeholder="jordan@example.com" autocomplete="email"><small>The signing form will check this address against the one on file.</small></label>
-        <label class="field-label">File reference <span class="optional">(optional)</span><input name="reference" maxlength="100" placeholder="e.g. MAT-2048"></label>
+        <label class="field-label">File name / reference <span class="optional">(optional)</span><input name="reference" maxlength="100" placeholder="e.g. MIND onboarding · MAT-2048"><small>This is your internal label for the client file.</small></label>
         <div class="form-divider"></div>
         <div class="card-title-row"><span class="step-number">02</span><div><h2>Your agreement</h2><p>Upload a PDF you already use with clients.</p></div></div>
         ${state.agreements.length ? `<label class="field-label">Use a saved agreement<select id="agreement-source"><option value="">Upload a new PDF</option>${state.agreements.map((agreement) => `<option value="${escapeHtml(agreement.id)}" ${agreement.id === selectedTemplateId ? "selected" : ""}>${escapeHtml(agreement.name)} · ${agreement.filesUsed} ${agreement.filesUsed === 1 ? "file" : "files"}</option>`).join("")}</select></label>` : ""}
+        <label class="field-label">Agreement name for this client file <span>*</span><input id="agreement-name" name="agreementName" required maxlength="180" placeholder="Choose or upload an agreement"><small>You can rename this file's agreement without changing the saved template.</small></label>
         <div id="new-agreement-content" ${selectedTemplateId ? "hidden" : ""}>
         <label class="upload-zone" id="upload-zone" for="agreement-file">
           <span class="upload-icon">${icons.upload}</span><b id="upload-title">Choose an agreement to upload</b><span id="upload-caption">PDF only · Up to 20 MB</span>
         <input id="agreement-file" name="agreement" type="file" accept="application/pdf,.pdf">
         </label>
+        <div class="starter-template-picker" aria-label="Starter agreement templates">
+          <b>Start with a sample template</b>
+          <span>Choose one to test the signing flow now. You can upload your approved MIND agreement later.</span>
+          <div class="starter-template-options"><button type="button" data-starter-template="service"><strong>Client services agreement</strong><small>Sample agreement for a client engagement</small><em>Use template →</em></button><button type="button" data-starter-template="nda"><strong>Mutual NDA</strong><small>Sample confidentiality agreement</small><em>Use template →</em></button></div>
+          <small>For test/demo use only — have legal counsel approve any agreement before using it with clients.</small>
+        </div>
         <label class="save-agreement-option"><input id="save-as-agreement" type="checkbox" checked><span><b>Save for future client files</b><small>Reuse this agreement and signature position next time.</small></span></label>
         </div>
         <div id="upload-error" class="inline-error" hidden></div>
@@ -233,6 +271,7 @@ async function newFile(templateId = null, useDefaultAgreement = true) {
   `, { title: "New client file", subtitle: "Start a new file and prepare its agreement." });
   document.querySelector("[data-back]")?.addEventListener("click", dashboard);
   document.querySelector("#agreement-file").addEventListener("change", handleAgreementUpload);
+  document.querySelectorAll("[data-starter-template]").forEach((button) => button.addEventListener("click", () => createStarterAgreement(button.dataset.starterTemplate)));
   document.querySelector("#agreement-source")?.addEventListener("change", (event) => {
     loadSelectedAgreement(event.target.value);
   });
@@ -264,31 +303,62 @@ async function handleAgreementUpload(event) {
   }
   try {
     const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    if (new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") throw new Error("This file is not a readable PDF.");
-    const pdfDocument = await pdfjs.getDocument({ data: bytes.slice() }).promise;
-    state.pdfBytes = bytes;
-    state.pdfBase64 = toBase64(bytes);
-    state.pdfDocument = pdfDocument;
-    state.agreementName = file.name;
-    state.templateId = "";
-    state.page = 1;
-    state.pageCount = pdfDocument.numPages;
-    state.signatureField = null;
-    document.querySelector("#upload-title").textContent = file.name;
-    document.querySelector("#upload-caption").textContent = `${(file.size / (1024 * 1024)).toFixed(1)} MB · ${pdfDocument.numPages} ${pdfDocument.numPages === 1 ? "page" : "pages"}`;
-    document.querySelector("#upload-zone").classList.add("upload-complete");
-    document.querySelector("#preview-empty").hidden = true;
-    document.querySelector("#preview-wrap").hidden = false;
-    document.querySelector("#page-count").textContent = String(pdfDocument.numPages);
-    await renderPdfPage("agreement-canvas", pdfDocument, 1, "field-marker");
-    updatePlacementStatus();
-    document.querySelector("#previous-page").disabled = true;
-    document.querySelector("#next-page").disabled = pdfDocument.numPages === 1;
+    await useNewAgreementPdf(new Uint8Array(buffer), file.name, `${(file.size / (1024 * 1024)).toFixed(1)} MB`);
   } catch (error) {
     showError(error.message || "We couldn't read this PDF. Try another file.");
     event.target.value = "";
   }
+}
+
+async function useNewAgreementPdf(bytes, name, sizeLabel = "Starter template") {
+  if (new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") throw new Error("This file is not a readable PDF.");
+  const pdfDocument = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+  state.pdfBytes = bytes;
+  state.pdfBase64 = toBase64(bytes);
+  state.pdfDocument = pdfDocument;
+  state.agreementName = name;
+  document.querySelector("#agreement-name").value = name;
+  state.templateId = "";
+  state.page = 1;
+  state.pageCount = pdfDocument.numPages;
+  state.signatureField = null;
+  document.querySelector("#upload-title").textContent = name;
+  document.querySelector("#upload-caption").textContent = `${sizeLabel} · ${pdfDocument.numPages} ${pdfDocument.numPages === 1 ? "page" : "pages"}`;
+  document.querySelector("#upload-zone").classList.add("upload-complete");
+  document.querySelector("#preview-empty").hidden = true;
+  document.querySelector("#preview-wrap").hidden = false;
+  document.querySelector("#page-count").textContent = String(pdfDocument.numPages);
+  await renderPdfPage("agreement-canvas", pdfDocument, 1, "field-marker");
+  updatePlacementStatus();
+  document.querySelector("#previous-page").disabled = true;
+  document.querySelector("#next-page").disabled = pdfDocument.numPages === 1;
+}
+
+async function createStarterAgreement(kind) {
+  const isNda = kind === "nda";
+  const name = isNda ? "Sample Mutual NDA.pdf" : "Sample Client Services Agreement.pdf";
+  const title = isNda ? "SAMPLE MUTUAL NON-DISCLOSURE AGREEMENT" : "SAMPLE CLIENT SERVICES AGREEMENT";
+  const paragraphs = isNda
+    ? ["This sample agreement is for demonstration and test use only. It is not legal advice and must be reviewed and approved by qualified counsel before use.", "The parties may share confidential business information solely to evaluate or perform a potential business relationship. Each party will protect the other party's confidential information using reasonable care and will not disclose it except as required by law.", "This obligation does not apply to information that is public, already known without restriction, independently developed, or rightfully received from another source. This sample document does not establish a commercial relationship."]
+    : ["This sample agreement is for demonstration and test use only. It is not legal advice and must be reviewed and approved by qualified counsel before use.", "Client engages Provider to perform the services described in a mutually agreed written scope of work. Provider will perform those services with reasonable care; Client will provide timely cooperation, information, and access needed for the work.", "Fees, project timing, deliverables, confidentiality, intellectual-property rights, liability limits, termination rights, and governing law must be completed and approved by the parties before this document is used for a real engagement."];
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([612, 792]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  page.drawText(title, { x: 54, y: 730, size: 16, font: bold, color: rgb(0.12, 0.18, 0.15) });
+  let y = 682;
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(" "); let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, 11) > 504) { page.drawText(line, { x: 54, y, size: 11, font, color: rgb(0.16, 0.20, 0.18) }); y -= 17; line = word; } else line = candidate;
+    }
+    if (line) { page.drawText(line, { x: 54, y, size: 11, font, color: rgb(0.16, 0.20, 0.18) }); y -= 32; }
+  }
+  page.drawText("Client signature", { x: 54, y: 155, size: 10, font: bold, color: rgb(0.16, 0.20, 0.18) });
+  page.drawLine({ start: { x: 54, y: 128 }, end: { x: 300, y: 128 }, thickness: 0.8, color: rgb(0.35, 0.39, 0.37) });
+  await useNewAgreementPdf(await pdf.save(), name);
+  toast("Sample template loaded. Place the signature field to continue.");
 }
 
 async function loadSelectedAgreement(templateId) {
@@ -324,6 +394,7 @@ async function loadSelectedAgreement(templateId) {
     state.pdfBytes = bytes;
     state.pdfDocument = pdfDocument;
     state.agreementName = agreement.name;
+  document.querySelector("#agreement-name").value = agreement.name;
     state.templateId = agreement.id;
     state.page = agreement.signatureField.page;
     state.pageCount = pdfDocument.numPages;
@@ -423,9 +494,9 @@ async function createFile(event) {
   const data = new FormData(form);
   try {
     const agreementPayload = state.templateId
-      ? { templateId: state.templateId }
+      ? { templateId: state.templateId, agreementName: data.get("agreementName") }
       : {
-        agreementName: state.agreementName || data.get("agreement")?.name,
+        agreementName: data.get("agreementName") || state.agreementName || data.get("agreement")?.name,
         pdfBase64: state.pdfBase64,
         signatureField: state.signatureField,
         pageCount: state.pageCount,
@@ -459,6 +530,9 @@ function openFile(id) {
   if (!file) return dashboard();
   state.file = file;
   const canStart = file.status === "signed";
+  const previewUrl = `/api/files/${escapeHtml(file.id)}/${canStart ? "signed" : "original"}`;
+  const previewTitle = canStart ? "Signed agreement PDF" : "Original agreement PDF";
+  const previewLabel = canStart ? "Signed agreement" : "Original agreement";
   const action = file.status === "draft" || file.status === "declined"
     ? `<button class="button button-primary" id="send-agreement">${icons.arrow} Send for signature</button>`
     : file.status === "signed"
@@ -471,8 +545,9 @@ function openFile(id) {
     <div class="detail-heading"><div class="client-avatar">${escapeHtml(initials(file.clientName))}</div><div class="detail-title"><div class="eyebrow">${escapeHtml(file.reference || "CLIENT FILE")} <span>·</span> CREATED ${formatDate(file.createdAt).toUpperCase()}</div><h1>${escapeHtml(file.clientName)}</h1><p>${escapeHtml(file.clientEmail)} <span class="detail-separator">·</span> ${escapeHtml(file.agreementName)}</p></div><div class="detail-actions">${action}<button class="icon-button more-button" aria-label="More file actions">···</button></div></div>
     <section class="gate-banner ${canStart ? "gate-cleared" : ""}"><span class="gate-icon">${canStart ? icons.check : icons.shield}</span><div><b>${canStart ? "Clear to begin work" : file.status === "declined" ? "Agreement declined" : file.status === "draft" ? "Not sent yet — work cannot begin" : "Agreement not signed — work cannot begin"}</b><p>${canStart ? `Signed by ${escapeHtml(file.signerName || file.clientName)} on ${formatDate(file.signedAt)}. This file is cleared to begin.` : file.status === "draft" || file.status === "declined" ? "Review the agreement and send a secure link to your client." : `Sent to ${escapeHtml(file.clientEmail)}. This file will be cleared automatically when the agreement is signed.`}</p></div><span class="gate-status">${statusMarkup(file.status)}</span></section>
     <div class="detail-grid">
-      <section class="detail-card document-card"><div class="detail-card-heading"><div><h2>Agreement</h2><p>Original agreement attached to this file.</p></div>${statusMarkup(file.status)}</div><div class="document-preview"><iframe title="Original agreement PDF" src="/api/files/${escapeHtml(file.id)}/original#toolbar=0&navpanes=0"></iframe><div class="document-overlay"></div></div><div class="document-footer"><span>${icons.file}<b>${escapeHtml(file.agreementName)}</b></span><a href="/api/files/${escapeHtml(file.id)}/original" target="_blank" rel="noopener">View original ${icons.arrow}</a></div>${canStart ? `<div class="signed-download-note">${icons.check}<span>Signed PDF includes the completed agreement and a certificate of completion.</span></div>` : ""}</section>
-      <aside class="detail-card activity-card"><div class="detail-card-heading"><div><h2>Activity</h2><p>A clear record for every step.</p></div><span class="activity-count">${file.events.length}</span></div><div class="timeline">${events}</div>${file.signatureUrl && file.status === "sent" ? `<div class="share-link-card"><span class="share-icon">${icons.shield}</span><div><b>Secure signing link</b><small>Share this link with your client.</small></div><button class="copy-link-inline" id="copy-link-inline" aria-label="Copy signing link">${copyIcon()}</button><input id="signing-link" readonly value="${escapeHtml(file.signatureUrl)}"></div>` : ""}
+      <section class="detail-card document-card"><div class="detail-card-heading"><div><h2>Agreement</h2><p>${canStart ? "Completed agreement with the client's signature." : "Original agreement attached to this file."}</p></div>${statusMarkup(file.status)}</div><div class="document-preview"><iframe title="${previewTitle}" src="${previewUrl}#toolbar=0&navpanes=0"></iframe><div class="document-overlay"></div></div><div class="document-footer"><span>${icons.file}<b>${escapeHtml(file.agreementName)}</b></span><a href="${previewUrl}" target="_blank" rel="noopener">View ${previewLabel.toLowerCase()} ${icons.arrow}</a></div>${canStart ? `<div class="signed-download-note">${icons.check}<span>Signed PDF includes the completed agreement and a certificate of completion.</span></div>` : ""}</section>
+      <aside class="detail-card activity-card"><div class="detail-card-heading"><div><h2>Activity</h2><p>A clear record for every step.</p></div><span class="activity-count">${file.events.length}</span></div><div class="timeline">${events}</div>${file.signatureUrl && file.status === "sent" ? `<div class="share-link-card"><span class="share-icon">${icons.shield}</span><div><b>Secure signing link</b><small>Share this link with your client.</small></div><button class="copy-share-button" id="copy-link-inline">Copy signing link</button><input id="signing-link" readonly value="${escapeHtml(file.signatureUrl)}"></div>` : ""}
+        ${file.clientPortalUrl ? `<div class="share-link-card"><span class="share-icon">${icons.file}</span><div><b>Client portal</b><small>Share this link for all this client's files.</small></div><button class="copy-share-button" id="copy-portal-link">Copy portal link</button><a class="portal-open-link" href="${escapeHtml(file.clientPortalUrl)}" target="_blank" rel="noopener">Open client portal ${icons.arrow}</a><input id="client-portal-link" readonly value="${escapeHtml(file.clientPortalUrl)}"></div>` : ""}
         ${canStart ? `<a class="signed-file-link" href="/api/files/${escapeHtml(file.id)}/signed" download>${icons.file}<span><b>Signed agreement</b><small>Download completed PDF</small></span>${icons.arrow}</a>` : ""}
       </aside>
     </div>
@@ -481,6 +556,7 @@ function openFile(id) {
   document.querySelector("#send-agreement")?.addEventListener("click", () => sendAgreement(file.id));
   document.querySelector("#copy-link")?.addEventListener("click", () => copySigningLink(file.signatureUrl));
   document.querySelector("#copy-link-inline")?.addEventListener("click", () => copySigningLink(file.signatureUrl));
+  document.querySelector("#copy-portal-link")?.addEventListener("click", () => copySigningLink(file.clientPortalUrl, "#client-portal-link"));
 }
 
 function eventTitle(type) {
@@ -512,12 +588,12 @@ async function sendAgreement(id) {
   }
 }
 
-async function copySigningLink(link) {
+async function copySigningLink(link, inputSelector = "#signing-link") {
   try {
     await navigator.clipboard.writeText(link);
     toast("Signing link copied.");
   } catch {
-    const input = document.querySelector("#signing-link");
+    const input = document.querySelector(inputSelector);
     if (input) {
       input.select();
       document.execCommand("copy");
@@ -525,6 +601,32 @@ async function copySigningLink(link) {
     } else {
       toast("Copy the signing URL from the file details.", "error");
     }
+  }
+}
+
+function clientPortalView(token) {
+  shell(`<div class="completion-card" id="client-portal"><span class="completion-icon">${icons.file}</span><div class="eyebrow">CLIENT PORTAL</div><h1>Your agreements</h1><p>Loading your documents…</p></div>`, { title: "Your agreements" });
+  document.querySelector(".sidebar")?.remove();
+  document.querySelector(".topbar")?.remove();
+  document.querySelector(".page-content")?.classList.add("completion-content");
+  loadClientPortal(token);
+}
+
+async function loadClientPortal(token) {
+  const portal = document.querySelector("#client-portal");
+  try {
+    const client = await api(`/api/client/${token}`);
+    const rows = client.files.map((file) => {
+      const action = file.status === "sent"
+        ? `<a class="button button-primary button-small" href="${escapeHtml(file.signingUrl)}">Review & sign</a>`
+        : file.status === "signed"
+          ? `<a class="button button-secondary button-small" href="${escapeHtml(file.signedUrl)}" download>Download signed PDF</a>`
+          : `<span class="status-pill status-${escapeHtml(file.status)}"><i></i>${escapeHtml(statusLabel(file.status))}</span>`;
+      return `<article class="client-agreement-row"><span class="row-file-icon ${file.status === "signed" ? "row-file-signed" : ""}">${icons.file}</span><div><b>${escapeHtml(file.agreementName)}</b><small>${escapeHtml(file.reference || "Client agreement")} · ${formatDate(file.signedAt || file.sentAt || file.createdAt)}</small></div><span class="status-pill status-${escapeHtml(file.status)}"><i></i>${escapeHtml(statusLabel(file.status))}</span>${action}</article>`;
+    }).join("") || "<p>No agreements are available in this portal.</p>";
+    portal.innerHTML = `<span class="completion-icon">${icons.file}</span><div class="eyebrow">CLIENT PORTAL</div><h1>Welcome, ${escapeHtml(client.clientName)}.</h1><p>Review and sign any agreement awaiting your action, or download completed agreements.</p><div class="client-agreement-list">${rows}</div>`;
+  } catch (error) {
+    portal.innerHTML = `<span class="error-symbol">!</span><div class="eyebrow">CLIENT PORTAL</div><h1>This portal link isn't available.</h1><p>${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -726,7 +828,7 @@ async function completeSigning(event, token) {
         sourceHash: await sha256(current.pdfBytes),
       }),
     });
-    showCompletion(signerName, signedAt);
+    showCompletion(signerName, signedAt, current.details.clientPortalUrl);
   } catch (problem) {
     error.hidden = false;
     error.textContent = problem.message;
@@ -753,8 +855,8 @@ async function declineAgreement(token) {
   }
 }
 
-function showCompletion(name, signedAt) {
-  shell(`<div class="completion-card"><span class="completion-icon">${icons.check}</span><div class="eyebrow">AGREEMENT COMPLETE</div><h1>All signed, ${escapeHtml(name.split(" ")[0])}.</h1><p>Your signed agreement and completion certificate are ready. The sender has been notified and their file is now cleared to begin work.</p><div class="completion-details"><span>${icons.check} Signed ${formatDate(signedAt)}</span><span>${icons.shield} Securely recorded</span></div><a href="#files" class="button button-primary completion-button">You're all set ${icons.arrow}</a></div>`, { title: "Agreement complete" });
+function showCompletion(name, signedAt, clientPortalUrl) {
+  shell(`<div class="completion-card"><span class="completion-icon">${icons.check}</span><div class="eyebrow">AGREEMENT COMPLETE</div><h1>All signed, ${escapeHtml(name.split(" ")[0])}.</h1><p>Your signed agreement and completion certificate are ready. The sender has been notified and their file is now cleared to begin work.</p><div class="completion-details"><span>${icons.check} Signed ${formatDate(signedAt)}</span><span>${icons.shield} Securely recorded</span></div><a href="${escapeHtml(clientPortalUrl || "#")}" class="button button-primary completion-button">View your agreements ${icons.arrow}</a></div>`, { title: "Agreement complete" });
   document.querySelector(".sidebar")?.remove();
   document.querySelector(".topbar")?.remove();
   document.querySelector(".page-content")?.classList.add("completion-content");
@@ -770,6 +872,11 @@ function expiredLink() {
 async function renderRoute() {
   const hash = window.location.hash;
   const signMatch = hash.match(/^#sign\/([a-f0-9]{64})$/);
+  const clientMatch = hash.match(/^#client\/([a-f0-9]{64})$/);
+  if (clientMatch) {
+    clientPortalView(clientMatch[1]);
+    return;
+  }
   if (signMatch) {
     signView(signMatch[1]);
     return;
