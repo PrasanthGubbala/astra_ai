@@ -45,4 +45,4 @@ The included `render.yaml` builds and runs the app as a Node web service and mou
 
 ## Implementation
 
-Vanilla JavaScript, Vite, PDF.js (document preview), pdf-lib (signed PDF and completion certificate), and a Node.js HTTP server with a small JSON index and local PDF storage. No AI or third-party signing API is used.
+Vanilla JavaScript, Vite, PDF.js (document preview), pdf-lib (signed PDF and completion certificate), and a Node.js HTTP server with a small JSON index and local PDF storage. Built with GitHub Copilot SDK in VS Code. No AI or third-party signing API is used at runtime.
