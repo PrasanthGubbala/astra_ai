@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+if (existsSync(path.join(root, ".env"))) process.loadEnvFile(path.join(root, ".env"));
 const dataDir = process.env.DATA_DIR || path.join(root, "data");
 const originalDir = path.join(dataDir, "originals");
 const signedDir = path.join(dataDir, "signed");
